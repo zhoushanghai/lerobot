@@ -7,14 +7,10 @@ import numpy as np
 import time
 from functools import cached_property
 
-import pyrealsense2 as rs
 import cv2
-#from demo_can import hand_control,hand_start,hand_read,write6
 # Import demo_modbus from ur5e_lib directory (relative import)
 from .ur5e_lib.demo_modbus import hand_control, hand_start, hand_read, write_register
 
-# 导入pyorbbecsdk相关类型
-from pyorbbecsdk import *
 from typing import Union, Optional, Any
 
 
@@ -41,8 +37,8 @@ class UR5eRobot(Robot):
         }
 
     # 观测：6关节+相机
-    @cached_property
-    def observation_features(self):
+    @property
+    def _motors_ft(self) -> dict[str, type]:
         return {
             "joint_1.pos": float,
             "joint_2.pos": float,
@@ -50,10 +46,23 @@ class UR5eRobot(Robot):
             "joint_4.pos": float,
             "joint_5.pos": float,
             "joint_6.pos": float,
-            "hand_pos": float, 
-            "webcam_rgb": (480, 480, 3),  # 外部相机分辨率为480x480
-            "wrist_rgb":(480,480,3),
+            "hand_pos": float,
         }
+    
+    @property
+    def _cameras_ft(self) -> dict[str, tuple]:
+        # 从配置的相机中获取特征
+        # 注意：这里返回的是目标分辨率（480x480），而不是相机实际分辨率
+        # 相机实际分辨率可能是 640x480，但在 get_observation 中会调整到 480x480
+        features = {}
+        for cam_name in self.cameras:
+            # 目标分辨率是 480x480（用于数据集）
+            features[cam_name] = (480, 480, 3)
+        return features
+    
+    @cached_property
+    def observation_features(self):
+        return {**self._motors_ft, **self._cameras_ft}
 
     def __init__(self, config: UR5eConfig):
         super().__init__(config)
@@ -64,16 +73,18 @@ class UR5eRobot(Robot):
         # 初始化变量（稍后在 connect() 中连接）
         self.robot1 = None
         self.r_inter = None
-        self.pipeline = None
-        self.pipeline1 = None
-        self.config1 = None
         self.ser1 = None
         self.old_hand_pose = [1000, 1000, 1000, 1000, 1000, 0]  # 初始化手部姿态
+        
+        # 从配置创建相机对象（使用 OpenCV 相机）
+        self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
     def is_connected(self) -> bool:
         """Whether the robot is currently connected or not."""
-        return self.robot1 is not None and self.r_inter is not None
+        # 机器人必须连接，但相机可以部分连接失败（会在 get_observation 中返回黑色图像）
+        robot_connected = self.robot1 is not None and self.r_inter is not None
+        return robot_connected
     
     @property
     def is_calibrated(self) -> bool:
@@ -103,48 +114,18 @@ class UR5eRobot(Robot):
         self.r_inter = rtde_receive.RTDEReceiveInterface(self.robot_ip)
         print("Robot connected successfully")
         
-        # 初始化 RealSense 相机（手腕相机）
-        try:
-            print("Initializing RealSense camera...")
-            self.pipeline = rs.pipeline()
-            rs_config = rs.config()
-            rs_config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-            self.pipeline.start(rs_config)
-            print("RealSense camera initialized")
-        except Exception as e:
-            print(f"Warning: Failed to initialize RealSense camera: {e}")
-            self.pipeline = None
-        
-        # 初始化 Orbbec 相机（外部相机）
-        try:
-            print("Initializing Orbbec camera...")
-            self.config1 = Config()
-            self.pipeline1 = Pipeline()
-            
-            # 获取摄像头的流配置
-            profile_list = self.pipeline1.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
-            color_profile = None
-            for cp in profile_list:
-                if cp.get_format() == OBFormat.RGB and cp.get_width() == 640 and cp.get_height() == 480:
-                    color_profile = cp
-                    print("使用640x480的color profile")
-                    break
-            if color_profile is None:
-                color_profile = profile_list.get_default_video_stream_profile()
-                print("未找到640x480的color profile，使用默认: ", color_profile)
-            self.config1.enable_stream(color_profile)
-            
-            # 启动摄像头
-            self.pipeline1.start(self.config1)
-            print("Orbbec camera initialized")
-        except Exception as e:
-            print(f"Warning: Failed to initialize Orbbec camera: {e}")
-            print("You may need to:")
-            print("1. Check if the camera is connected")
-            print("2. Check camera permissions (run: sudo usermod -a -G video $USER)")
-            print("3. Make sure no other program is using the camera")
-            self.pipeline1 = None
-            self.config1 = None
+        # 连接相机（使用配置中的 OpenCV 相机）
+        print("Connecting cameras...")
+        for cam_name, cam in self.cameras.items():
+            try:
+                cam.connect()
+                print(f"Camera '{cam_name}' connected successfully")
+            except Exception as e:
+                print(f"Warning: Failed to connect camera '{cam_name}': {e}")
+                print("You may need to:")
+                print("1. Check if the camera is connected")
+                print("2. Check camera permissions (run: sudo usermod -a -G video $USER)")
+                print("3. Make sure no other program is using the camera")
         
         # 初始化手部夹爪
         try:
@@ -169,51 +150,24 @@ class UR5eRobot(Robot):
     def disconnect(self):
         """Disconnect from the robot and perform any necessary cleanup."""
         try:
-            if hasattr(self, 'pipeline') and self.pipeline:
-                self.pipeline.stop()
-            if hasattr(self, 'pipeline1') and self.pipeline1:
-                self.pipeline1.stop()
+            # 断开相机连接
+            for cam in self.cameras.values():
+                try:
+                    cam.disconnect()
+                except Exception as e:
+                    print(f"Error disconnecting camera: {e}")
+            
+            # 断开机器人连接
             if hasattr(self, 'robot1') and self.robot1:
                 self.robot1.stopScript()
                 self.robot1.disconnect()
             if hasattr(self, 'r_inter') and self.r_inter:
                 self.r_inter.disconnect()
         except Exception as e:
-            print(f"断开连接时出错: {e}")
-    
-    def frame_to_bgr_image(self,frame: VideoFrame) -> Union[Optional[np.array], Any]:
-        width = frame.get_width()
-        height = frame.get_height()
-        color_format = frame.get_format()
-        data = np.asanyarray(frame.get_data())
-        image = np.zeros((height, width, 3), dtype=np.uint8)
-        if color_format == OBFormat.RGB:
-            image = np.resize(data, (height, width, 3))
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        elif color_format == OBFormat.BGR:
-            image = np.resize(data, (height, width, 3))
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        elif color_format == OBFormat.YUYV:
-            image = np.resize(data, (height, width, 2))
-            image = cv2.cvtColor(image, cv2.COLOR_YUV2BGR_YUYV)
-        elif color_format == OBFormat.MJPG:
-            image = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        elif color_format == OBFormat.I420:
-            image = i420_to_bgr(data, width, height)
-            return image
-        elif color_format == OBFormat.NV12:
-            image = nv12_to_bgr(data, width, height)
-            return image
-        elif color_format == OBFormat.NV21:
-            image = nv21_to_bgr(data, width, height)
-            return image
-        elif color_format == OBFormat.UYVY:
-            image = np.resize(data, (height, width, 2))
-            image = cv2.cvtColor(image, cv2.COLOR_YUV2BGR_UYVY)
-        else:
-            print("Unsupported color format: {}".format(color_format))
-            return None
-        return image
+            print(f"Error during disconnect: {e}")
+        finally:
+            self.robot1 = None
+            self.r_inter = None
     
     def get_observation(self):
         if not self.is_connected:
@@ -239,62 +193,7 @@ class UR5eRobot(Robot):
         else:
             hand_pos = 1.0  # 默认值
 
-        # 获取手腕相机图像（RealSense）
-        if self.pipeline is not None:
-            try:
-                frames1 = self.pipeline.wait_for_frames()
-                color_frame = frames1.get_color_frame()
-                if color_frame:
-                    wrist_img = np.asanyarray(color_frame.get_data())
-                    # 截取中间正方形区域
-                    h, w, _ = wrist_img.shape
-                    side = min(h, w)
-                    y1 = (h - side) // 2
-                    x1 = (w - side) // 2
-                    wrist_img = wrist_img[y1:y1 + side, x1:x1 + side, :]
-                    # 确保是RGB格式，uint8类型，HWC形状
-                    wrist_img = cv2.cvtColor(wrist_img, cv2.COLOR_BGR2RGB)
-                    wrist_img = wrist_img.astype(np.uint8)
-                    # 调整图片大小为480x480（匹配 observation_features）
-                    wrist_img = cv2.resize(wrist_img, (480, 480))
-                else:
-                    wrist_img = np.zeros((480, 480, 3), dtype=np.uint8)
-            except Exception as e:
-                print(f"Warning: Failed to read RealSense camera: {e}")
-                wrist_img = np.zeros((480, 480, 3), dtype=np.uint8)
-        else:
-            wrist_img = np.zeros((480, 480, 3), dtype=np.uint8)
-
-        # 获取外部相机图像（Orbbec）
-        if self.pipeline1 is not None:
-            try:
-                frames2 = self.pipeline1.wait_for_frames(10)
-                if frames2:
-                    color_frame = frames2.get_color_frame()
-                    img = self.frame_to_bgr_image(color_frame)
-                    if img is not None and img.shape[0] > 0 and img.shape[1] > 0:
-                        # 截取中间正方形区域
-                        h, w, _ = img.shape
-                        side = min(h, w)
-                        y1 = (h - side) // 2
-                        x1 = (w - side) // 2
-                        img = img[y1:y1 + side, x1:x1 + side, :]
-                        # 确保是RGB格式，uint8类型，HWC形状
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        img = img.astype(np.uint8)
-                        # 调整图片大小为480x480
-                        img = cv2.resize(img, (480, 480))
-                    else:
-                        img = np.zeros((480, 480, 3), dtype=np.uint8)
-                else:
-                    img = np.zeros((480, 480, 3), dtype=np.uint8)
-            except Exception as e:
-                print(f"Warning: Failed to read Orbbec camera: {e}")
-                img = np.zeros((480, 480, 3), dtype=np.uint8)
-        else:
-            img = np.zeros((480, 480, 3), dtype=np.uint8)
-
-        # 注意：必须完全匹配 observation_features 中定义的键
+        # 构建观察字典
         observation = {
             # 关节位置
             "joint_1.pos": float(joints[0]),
@@ -305,10 +204,55 @@ class UR5eRobot(Robot):
             "joint_6.pos": float(joints[5]),
             # 手部位置（单个值）
             "hand_pos": hand_pos,
-            # 图像数据（必须与 observation_features 中的键名匹配）
-            "webcam_rgb": img,  # 外部相机图像
-            "wrist_rgb": wrist_img,  # 手腕相机图像
         }
+        
+        # 从配置的相机中读取图像（使用 OpenCV 相机）
+        for cam_key, cam in self.cameras.items():
+            try:
+                # 检查相机是否已连接
+                if not cam.is_connected:
+                    print(f"Warning: Camera '{cam_key}' is not connected")
+                    target_height = cam.config.height if cam.config.height else 480
+                    target_width = cam.config.width if cam.config.width else 480
+                    img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                    observation[cam_key] = img
+                    continue
+                
+                # 尝试读取图像，增加超时时间
+                try:
+                    img = cam.async_read(timeout_ms=500)
+                    if img is None or img.size == 0:
+                        # 如果读取失败，返回黑色图像
+                        print(f"Warning: Camera '{cam_key}' returned empty frame")
+                        target_height = cam.config.height if cam.config.height else 480
+                        target_width = cam.config.width if cam.config.width else 480
+                        img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                    else:
+                        # 调整图像大小到目标分辨率（480x480）
+                        # 无论相机实际分辨率是多少，都调整为 480x480 以匹配 observation_features
+                        target_height = 480
+                        target_width = 480
+                        if img.shape[0] != target_height or img.shape[1] != target_width:
+                            img = cv2.resize(img, (target_width, target_height))
+                            # 确保图像是 RGB 格式
+                            if img.shape[2] == 3:
+                                # 确保是 uint8 类型
+                                img = img.astype(np.uint8)
+                except TimeoutError as e:
+                    print(f"Warning: Timeout reading from camera '{cam_key}': {e}")
+                    target_height = cam.config.height if cam.config.height else 480
+                    target_width = cam.config.width if cam.config.width else 480
+                    img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                
+                observation[cam_key] = img
+            except Exception as e:
+                print(f"Warning: Failed to read camera '{cam_key}': {e}")
+                print(f"Camera info: is_connected={cam.is_connected if hasattr(cam, 'is_connected') else 'unknown'}")
+                # 返回黑色图像
+                target_height = cam.config.height if cam.config.height else 480
+                target_width = cam.config.width if cam.config.width else 480
+                img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                observation[cam_key] = img
         
         return observation
 
@@ -390,12 +334,3 @@ class UR5eRobot(Robot):
         
         # return actual executed action (包含所有必需的键)
         return complete_action
-
-    @property
-    def cameras(self):
-        # LeRobot用于判断有无相机
-        # 返回相机字典，键名应该与 observation_features 中的相机键名匹配
-        # 注意：这里返回的是实际的相机对象，LeRobot 会使用它们来读取图像
-        # 但由于我们已经在 get_observation() 中手动读取了图像，这里可以返回空字典
-        # 或者返回相机对象以便 LeRobot 可以自动读取
-        return {}  # 空字典，因为我们已经在 get_observation() 中手动处理相机
