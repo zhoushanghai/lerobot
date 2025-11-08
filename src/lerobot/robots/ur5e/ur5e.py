@@ -53,16 +53,16 @@ class UR5eRobot(Robot):
     def _cameras_ft(self) -> dict[str, tuple]:
         # 从配置的相机中获取特征
         # 注意：这里返回的是目标分辨率（用于数据集），而不是相机实际分辨率
-        # 目标分辨率统一为 480x480，以保持数据集的一致性
+        # 目标分辨率统一为 224x224，以保持数据集的一致性
         # 相机实际分辨率（如 640x480）会在 get_observation 中调整到目标分辨率
         features = {}
         for cam_name, cam in self.cameras.items():
-            # 目标分辨率统一为 480x480（用于数据集）
+            # 目标分辨率统一为 224x224（用于数据集）
             # 如果需要使用配置中的分辨率，可以使用：
-            # target_height = cam.config.height if cam.config.height else 480
-            # target_width = cam.config.width if cam.config.width else 480
+            # target_height = cam.config.height if cam.config.height else 224
+            # target_width = cam.config.width if cam.config.width else 224
             # features[cam_name] = (target_height, target_width, 3)
-            features[cam_name] = (480, 480, 3)
+            features[cam_name] = (224, 224, 3)
         return features
     
     @cached_property
@@ -80,7 +80,7 @@ class UR5eRobot(Robot):
         self.ser1 = None
         self.old_hand_pose = [1000, 1000, 1000, 1000, 1000, 0]  # 初始化手部姿态
         
-        # 从配置创建相机对象（使用 OpenCV 相机）
+        # 从配置创建相机对象
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
@@ -211,18 +211,18 @@ class UR5eRobot(Robot):
         }
         
         # 从配置的相机中读取图像
-        # 目标分辨率统一为 480x480，以匹配 observation_features
-        target_height = 480
-        target_width = 480
+        # 目标分辨率统一为 224x224，以匹配 observation_features
+        target_height = 224
+        target_width = 224
         
         for cam_key, cam in self.cameras.items():
             try:
-                # 检查相机是否已连接
-                if not cam.is_connected:
-                    print(f"Warning: Camera '{cam_key}' is not connected, returning black image")
-                    img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
-                    observation[cam_key] = img
-                    continue
+                # # 检查相机是否已连接
+                # if not cam.is_connected:
+                #     print(f"Warning: Camera '{cam_key}' is not connected, returning black image")
+                #     img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                #     observation[cam_key] = img
+                #     continue
                 
                 # 尝试读取图像
                 try:
@@ -232,8 +232,8 @@ class UR5eRobot(Robot):
                         print(f"Warning: Camera '{cam_key}' returned empty frame")
                         img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
                     else:
-                        # 调整图像大小到目标分辨率（480x480）
-                        # 无论相机实际分辨率是多少（如配置中的 640x480），都调整为 480x480
+                        # 调整图像大小到目标分辨率（224x224）
+                        # 无论相机实际分辨率是多少（如配置中的 640x480），都调整为 224x224
                         # 以匹配 observation_features 中定义的分辨率
                         if img.shape[0] != target_height or img.shape[1] != target_width:
                             img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)

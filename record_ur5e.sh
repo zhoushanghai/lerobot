@@ -29,7 +29,7 @@ python3 -m lerobot.record \
     --teleop.type=keyboard \
     --dataset.repo_id=your_username/ur5e_dataset \
     --dataset.root="$DATASET_DIR" \
-    --dataset.num_episodes=10 \
+    --dataset.num_episodes=100 \
     --dataset.single_task="Pick and place the object" \
     --dataset.fps=30 \
     --dataset.episode_time_s=60 \

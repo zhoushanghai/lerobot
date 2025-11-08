@@ -344,6 +344,15 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     listener, events = init_keyboard_listener()
 
     with VideoEncodingManager(dataset):
+        # Reset robot to initial position before starting the first episode
+        if hasattr(robot, "reset") and callable(getattr(robot, "reset")):
+            try:
+                log_say("Resetting robot to initial position before first episode", cfg.play_sounds)
+                robot.reset()
+                log_say("Robot reset completed", cfg.play_sounds)
+            except Exception as e:
+                logging.warning(f"Robot reset failed before first episode: {e}. Continuing anyway.")
+
         recorded_episodes = 0
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
             log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
@@ -365,6 +374,14 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
             ):
                 log_say("Reset the environment", cfg.play_sounds)
+                # Call robot.reset() if the method exists
+                if hasattr(robot, "reset") and callable(getattr(robot, "reset")):
+                    try:
+                        robot.reset()
+                        log_say("Robot reset completed", cfg.play_sounds)
+                    except Exception as e:
+                        logging.warning(f"Robot reset failed: {e}. Continuing with manual reset phase.")
+                # Run reset loop to allow manual teleoperation if needed
                 record_loop(
                     robot=robot,
                     events=events,
