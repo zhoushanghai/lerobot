@@ -43,6 +43,11 @@ def make_cameras_from_configs(camera_configs: dict[str, CameraConfig]) -> dict[s
 
             cameras[key] = Reachy2Camera(cfg)
 
+        elif cfg.type == "orbbec":
+            from .orbbec import OrbbecCamera
+
+            cameras[key] = OrbbecCamera(cfg)
+
         else:
             raise ValueError(f"The camera type '{cfg.type}' is not valid.")
 

@@ -15,9 +15,13 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from lerobot.common.cameras import CameraConfig
-from lerobot.common.cameras.opencv import OpenCVCameraConfig
-from lerobot.common.robots import RobotConfig
+
+from lerobot.cameras import CameraConfig
+from lerobot.cameras.opencv import OpenCVCameraConfig
+from lerobot.cameras.orbbec import OrbbecCameraConfig
+from lerobot.cameras.realsense import RealSenseCameraConfig
+
+from ..config import RobotConfig
 
 
 @RobotConfig.register_subclass("ur5e")
@@ -25,23 +29,21 @@ from lerobot.common.robots import RobotConfig
 class UR5eConfig(RobotConfig):
     # 机器人IP地址
     robot_ip: str = "192.168.31.2"
-    # 相机ID
-    camera_id: int = 0
     
-    # 相机配置
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            "webcam": OpenCVCameraConfig(
-                index_or_path=0,
+            "webcam": OrbbecCameraConfig(
+                serial_number_or_index=1,  # 相机索引或序列号
                 fps=30,
-                width=480,
-                height=480,
+                width=640,   # 相机实际支持的分辨率宽度
+                height=480,  # 相机实际支持的分辨率高度
             ),
             "wrist_camera": OpenCVCameraConfig(
-                index_or_path=1,
+                index_or_path=6,  # 更新为实际可用的相机索引
                 fps=30,
-                width=480,
+                width=640,
                 height=480,
             ),
         }
     )
+
