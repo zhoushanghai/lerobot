@@ -232,18 +232,55 @@ class UR5eRobot(Robot):
                         print(f"Warning: Camera '{cam_key}' returned empty frame")
                         img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
                     else:
-                        # 调整图像大小到目标分辨率（224x224）
-                        # 无论相机实际分辨率是多少（如配置中的 640x480），都调整为 224x224
-                        # 以匹配 observation_features 中定义的分辨率
-                        if img.shape[0] != target_height or img.shape[1] != target_width:
-                            img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
-                        
                         # 确保图像格式正确：RGB, uint8, 3通道
-                        if len(img.shape) == 3 and img.shape[2] == 3:
-                            img = img.astype(np.uint8)
-                        else:
+                        if len(img.shape) != 3 or img.shape[2] != 3:
                             print(f"Warning: Camera '{cam_key}' returned unexpected image shape: {img.shape}")
                             img = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                        else:
+                            img = img.astype(np.uint8)
+                            
+                            # 对于 webcam，从原始图像顶部中心截取宽度二分之一大小的正方形，然后 resize 到 224x224
+                            # 对于其他相机，使用 resize 调整大小
+                            if cam_key == "webcam":
+                                # 从顶部中心截取宽度二分之一大小的正方形
+                                h, w = img.shape[:2]
+                                crop_size = int(w / 2)  # 宽度二分之一
+                                crop_size += 20
+                                
+                                if h >= crop_size and w >= crop_size:
+                                    # 计算裁剪区域的起始位置（顶部中心）
+                                    start_x = (w - crop_size) // 2  # 水平居中
+                                    start_y = 0  # 从顶部开始
+                                    # 裁剪图像: img[y:y+h, x:x+w]
+                                    img = img[start_y:start_y+crop_size, start_x:start_x+crop_size]
+                                    # 将裁剪后的正方形 resize 到 224x224
+                                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+                                else:
+                                    # 如果原始图像太小，直接 resize
+                                    print(f"Warning: Camera '{cam_key}' image too small ({h}x{w}), using resize directly")
+                                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+                            elif cam_key == "wrist_camera":
+                                # 对于 wrist_camera，从左边开始截取最大的正方形，然后 resize 到 224x224
+                                h, w = img.shape[:2]
+                                # 计算最大正方形的大小
+                                crop_size = min(h, w)  # 最大正方形
+                                
+                                if crop_size > 0:
+                                    # 从左边开始截取正方形
+                                    start_x = 0  # 从左边开始
+                                    start_y = 0  # 从顶部开始
+                                    # 截取正方形区域: img[y:y+h, x:x+w]
+                                    img = img[start_y:start_y+crop_size, start_x:start_x+crop_size]
+                                    # 将截取的正方形 resize 到 224x224
+                                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+                                else:
+                                    # 如果原始图像无效，直接 resize
+                                    print(f"Warning: Camera '{cam_key}' image invalid ({h}x{w}), using resize directly")
+                                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+                            else:
+                                # 对于其他相机，使用 resize
+                                if img.shape[0] != target_height or img.shape[1] != target_width:
+                                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
                             
                 except TimeoutError as e:
                     print(f"Warning: Timeout reading from camera '{cam_key}' (timeout: 500ms): {e}")
