@@ -10,8 +10,9 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 # 而且本地记录不需要访问 Hugging Face Hub
 unset ALL_PROXY
 unset all_proxy
-# 数据集目录路径
-DATASET_DIR="$HOME/.cache/huggingface/lerobot/your_username/ur5e_dataset"
+# 方式2: 使用自定义路径（推荐，方便管理）
+DATASET_DIR="$(pwd)/datasets/ur5e_dataset"
+
 # 如果 resume=false 且数据集目录已存在，则删除旧数据集
 if [ -d "$DATASET_DIR" ]; then
     echo "检测到已存在的数据集目录: $DATASET_DIR"
@@ -19,6 +20,7 @@ if [ -d "$DATASET_DIR" ]; then
     rm -rf "$DATASET_DIR"
     echo "旧数据集已删除"
 fi
+
 # 运行记录脚本
 python3 -m lerobot.record \
     --robot.type=ur5e \
@@ -26,6 +28,7 @@ python3 -m lerobot.record \
     --robot.id=my_ur5e \
     --teleop.type=keyboard \
     --dataset.repo_id=your_username/ur5e_dataset \
+    --dataset.root="$DATASET_DIR" \
     --dataset.num_episodes=10 \
     --dataset.single_task="Pick and place the object" \
     --dataset.fps=30 \

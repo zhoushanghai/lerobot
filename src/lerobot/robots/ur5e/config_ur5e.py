@@ -17,6 +17,7 @@
 from dataclasses import dataclass, field
 
 from lerobot.cameras import CameraConfig
+from lerobot.cameras.configs import Cv2Rotation
 from lerobot.cameras.opencv import OpenCVCameraConfig
 from lerobot.cameras.orbbec import OrbbecCameraConfig
 from lerobot.cameras.realsense import RealSenseCameraConfig
@@ -39,11 +40,13 @@ class UR5eConfig(RobotConfig):
                 height=480,  # 相机实际支持的分辨率高度
             ),
             "wrist_camera": OpenCVCameraConfig(
-                index_or_path=6,  # 更新为实际可用的相机索引
+                index_or_path=8,  # 更新为实际可用的相机索引
                 fps=30,
                 width=640,
                 height=480,
+                rotation=Cv2Rotation.ROTATE_180,  # 旋转180度（倒置）
             ),
         }
     )
 
+# v4l2-ctl --list-devices
