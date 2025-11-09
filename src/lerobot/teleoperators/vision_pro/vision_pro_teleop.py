@@ -2,6 +2,7 @@
 
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -112,10 +113,8 @@ class VisionProTeleop(Teleoperator):
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
         # 获取 TCP pose：优先使用传入的 tcp_pose，否则从 robot 获取，最后使用 config.tcp_pose
-        tcp_pose_to_use = None
+        tcp_pose_to_use = self.robot.init_tcp_pose
 
-        tcp_pose_to_use = self.robot.r_inter.getActualTCPPose()
-    
         logger.info("进行标定...")
         
         # 1. 从 VR 获取当前手腕姿态
@@ -175,14 +174,14 @@ class VisionProTeleop(Teleoperator):
             if latest is None:
                 if self.last_action is not None:
                     return self.last_action
-                return self._get_zero_action()
+                # return self._get_zero_action()
             
             # 1. 获取 VR 手腕姿态
             right_wrist = latest.get('right_wrist')
             if right_wrist is None:
                 if self.last_action is not None:
                     return self.last_action
-                return self._get_zero_action()
+                # return self._get_zero_action()
             
             vr_wrist = right_wrist[0].copy()  # shape (4, 4)
             
@@ -220,11 +219,33 @@ class VisionProTeleop(Teleoperator):
                 "joint_6.pos": float(tcp2joint[5]),
                 "hand_pos": float(right_fingers),
             }
+            print("(action send to robot):", action)
+            self.last_action = action
             return action
 
         except Exception as e:
-            logger.error(f"Failed to get action from {self}: {e}")
-            return self._get_zero_action()
+            import sys
+            print(f"Fatal error: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # 不要随意返回0,因为这可能导致机器人失控！！！
+    # 不要随意返回0,因为这可能导致机器人失控！！！
+    # 不要随意返回0,因为这可能导致机器人失控！！！
+    # def _get_zero_action(self) -> dict[str, Any]:
+    #     """返回零动作（所有关节保持当前位置，手部保持张开）"""
+    #     if self.last_action is not None:
+    #         return self.last_action
+        
+    #     # 返回零动作：所有关节为0，手部完全张开
+    #     return {
+    #         "joint_1.pos": 0.0,
+    #         "joint_2.pos": 0.0,
+    #         "joint_3.pos": 0.0,
+    #         "joint_4.pos": 0.0,
+    #         "joint_5.pos": 0.0,
+    #         "joint_6.pos": 0.0,
+    #         "hand_pos": 1.0,  # 完全张开
+    #     }
     
     def _limit_tcp_pose(self, tcp_cmd: list[float] | np.ndarray) -> list[float]:
         """

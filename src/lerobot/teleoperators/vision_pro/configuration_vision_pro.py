@@ -12,7 +12,7 @@ class VisionProTeleopConfig(TeleoperatorConfig):
     # VR 数据源参数
     mode: str = "playback"  # 'visionpro' | 'playback'
     recording_file: str | None = "visionpro_30s_recording.pkl"
-    host: str = "10.7.175.122"  # Vision Pro 主机地址（visionpro 模式）
+    host: str = "10.7.144.112"  # Vision Pro 主机地址（visionpro 模式）
     
     # 追踪选项
     use_hand_tracking: bool = True

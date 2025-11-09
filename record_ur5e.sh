@@ -52,3 +52,6 @@ python3 -m lerobot.record \
     --dataset.push_to_hub=false \
     --display_data=true \
     --resume=false
+
+
+    # playback visionpro

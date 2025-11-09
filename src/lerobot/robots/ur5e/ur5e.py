@@ -82,6 +82,8 @@ class UR5eRobot(Robot):
         self.r_inter = None
         self.ser1 = None
         self.old_hand_pose = [1000, 1000, 1000, 1000, 1000, 0]  # 初始化手部姿态
+        self.init_tcp_pose = [-0.35,-0.4,0.330,0.126,2.286,-2.2]
+
         
         # 从配置创建相机对象
         self.cameras = make_cameras_from_configs(config.cameras)
@@ -331,18 +333,18 @@ class UR5eRobot(Robot):
     def reset(self) -> None:
         """Reset the environment to its initial state."""
         # 重置机器人到初始位置
-        tcp_pose = [-0.35,-0.4,0.330,0.126,2.286,-2.2]
-        self.robot1.moveL(tcp_pose, 0.1, 0.5, False)
-        # joint_pos = [-2.122, -1.749, -1.78, -2.795, -2.04, -3.126]
-        # self.robot1.moveJ(joint_pos, 0.1, 0.5, False)
+        joint_pos = [-2.122, -1.749, -1.78, -2.795, -2.04, -3.126]
+        self.robot1.moveJ(joint_pos, 0.1, 0.5, False)
+
+        self.robot1.moveL(self.init_tcp_pose, 0.1, 0.5, False)
         time.sleep(2)
         # 重置手部位置
         hand_targets = [1000, 1000, 1000, 1000, 1000, 1000]
         hand_control(self.ser1, hand_targets)
-        time.sleep(0.5)
+        time.sleep(0.2)
         hand_targets = [400, 400, 400, 400, 400, 400]
         hand_control(self.ser1, hand_targets)
-        time.sleep(0.5)
+        time.sleep(0.2)
         hand_targets = [1000, 1000, 1000, 1000, 1000, 1000]
         hand_control(self.ser1, hand_targets)
         time.sleep(1)
@@ -355,10 +357,17 @@ class UR5eRobot(Robot):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
+        print("ur5e send_action:", action)
+        
         # 控制机械臂
         try:
             joint_targets = [action[f"joint_{i+1}.pos"] for i in range(6)]
-            self.robot1.servoJ(joint_targets, 0.2, 0.5, 0.03, 0.1)
+            speed = 0.2
+            acceleration = 0.5
+            time_ur = 0.1
+            lookahead_time = 0.03
+            gain = 1000
+            self.robot1.servoJ(joint_targets, speed, acceleration, time_ur, lookahead_time, gain)
         except Exception as e:
             print(f"Warning: Failed to send joint command: {e}")
         
