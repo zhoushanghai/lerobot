@@ -113,7 +113,8 @@ class VisionProTeleop(Teleoperator):
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
         # 获取 TCP pose：优先使用传入的 tcp_pose，否则从 robot 获取，最后使用 config.tcp_pose
-        tcp_pose_to_use = self.robot.init_tcp_pose
+        joint,tcp = self.robot.read()
+        tcp_pose_to_use = tcp 
 
         logger.info("进行标定...")
         
@@ -163,6 +164,10 @@ class VisionProTeleop(Teleoperator):
             raise DeviceNotConnectedError(
                 f"{self} is not connected. You need to run `connect()` before `get_action()`."
             )
+
+        if self.robot.need_calibration:
+            self.calibrate()
+            self.robot.need_calibration = False
 
         if not self.is_calibrated:
             raise RuntimeError(

@@ -93,6 +93,8 @@ class UR5eRobot(Robot):
 
         self.latest_tcp_pose = None
         self.latest_joints = None
+
+        self.need_calibration = False  # UR5e 默认已校准
     
     @classmethod
     def get_active_instance(cls) -> 'UR5eRobot | None':
@@ -336,11 +338,14 @@ class UR5eRobot(Robot):
         joint_pos = [-2.122, -1.749, -1.78, -2.795, -2.04, -3.126]
         speed = 0.2
         acceleration = 0.5
-        time_ur = 4
+        time_ur = 3
         lookahead_time = 0.2
         gain = 1000
         self.robot1.servoJ(joint_pos, speed, acceleration, time_ur, lookahead_time, gain)
-        time.sleep(1)
+        time.sleep(3.5)
+        
+        self.need_calibration = True
+        
         # 重置手部位置
         hand_targets = [1000, 1000, 1000, 1000, 1000, 1000]
         hand_control(self.ser1, hand_targets)
