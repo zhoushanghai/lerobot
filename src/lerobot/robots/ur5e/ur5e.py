@@ -358,7 +358,7 @@ class UR5eRobot(Robot):
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
         print("ur5e send_action:", action)
-        
+
         # 控制机械臂
         try:
             joint_targets = [action[f"joint_{i+1}.pos"] for i in range(6)]
@@ -376,7 +376,7 @@ class UR5eRobot(Robot):
             try:
                 # 0-4号手指都使用450-1000映射
                 # hand_pos 代表 right_fingers，原始值应在 0~1
-                hand_targets = [1000, 1000, 1000, 1000, 1000, 400]
+                hand_targets = [1000, 1000, 1000, 1000, 1000, 000]
 
                 pinch = float(action["hand_pos"])  # 期望范围 0~1
 

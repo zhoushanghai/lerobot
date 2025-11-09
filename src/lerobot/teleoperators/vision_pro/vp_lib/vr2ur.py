@@ -371,10 +371,10 @@ class VRArmMapper:
         # 先计算转换
         T_arm = self.T_arm_ee_init @ delta_T_vr
 
-        # 再在z轴方向平移-0.1
-        T_translate_z = np.eye(4)
-        T_translate_z[2, 3] = -0.1
-        T_arm = T_arm @ T_translate_z
+        # # 再在z轴方向平移-0.1
+        # T_translate_z = np.eye(4)
+        # T_translate_z[2, 3] = -0.1
+        # T_arm = T_arm @ T_translate_z
 
         print("机械臂在机械臂基底坐标系下的值:\n", T_arm)
         return T_arm

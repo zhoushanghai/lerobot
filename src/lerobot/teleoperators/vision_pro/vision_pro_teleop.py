@@ -125,10 +125,10 @@ class VisionProTeleop(Teleoperator):
         right_wrist = latest.get('right_wrist')
         T_vr = right_wrist[0].copy()  # shape (4, 4)
         
-        # 2. 在 z 轴方向平移 0.1
-        T_translate_z = np.eye(4)
-        T_translate_z[2, 3] = 0.1
-        T_vr = T_vr @ T_translate_z
+        # # 2. 在 z 轴方向平移 0.1
+        # T_translate_z = np.eye(4)
+        # T_translate_z[2, 3] = 0.1
+        # T_vr = T_vr @ T_translate_z
         
         # 3. 转换坐标系（VR 坐标系 -> 机械臂坐标系）
         T_vr = reorder_homogeneous(T_vr)
@@ -257,8 +257,11 @@ class VisionProTeleop(Teleoperator):
         Returns:
             限制后的 TCP pose [x, y, z, rx, ry, rz]
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         tcp_cmd = np.asarray(tcp_cmd)
-        
+
         # 获取上一次的 TCP pose（优先使用类内部记录的，否则从机器人获取）
         if self._prev_tcp is not None:
             prev_tcp = np.asarray(self._prev_tcp)
@@ -269,9 +272,9 @@ class VisionProTeleop(Teleoperator):
         else:
             # 如果没有上一帧数据，使用当前值作为初始值（第一次调用时）
             prev_tcp = tcp_cmd.copy()
-        
+
         step = self.config.tcp_step
-        
+
         # 对每个维度做步进限制，以及 clamp 到设定范围
         tcp_cmd_limited = []
         limits = [
@@ -282,24 +285,31 @@ class VisionProTeleop(Teleoperator):
             (-np.inf, np.inf),  # ry 不限制
             (-np.inf, np.inf),  # rz 不限制
         ]
-        
+
         for i, (v, prev, (low, high)) in enumerate(zip(tcp_cmd, prev_tcp, limits)):
             # 只对前3维（x, y, z）做步进和范围限制
             if i < 3:
                 # 步进限制（clip 本帧变化最多 step）
                 delta = v - prev
-                delta = np.clip(delta, -step, step)
-                val = prev + delta
+                delta_clipped = np.clip(delta, -step, step)
+                val = prev + delta_clipped
                 # 限定范围
-                val = np.clip(val, low, high)
-                tcp_cmd_limited.append(float(val))
+                val_clamped = np.clip(val, low, high)
+                # 只有发生限制时才输出日志
+                if not np.isclose(delta, delta_clipped) or not np.isclose(val, val_clamped):
+                    logger.info(
+                        f"TCP维度{i}: 原始值={v:.6f}, 上一帧={prev:.6f}, "
+                        f"delta={delta:.6f} 限制后delta={delta_clipped:.6f}, "
+                        f"step限制={step}, 限制后val={val_clamped:.6f}, 范围=({low}, {high})"
+                    )
+                tcp_cmd_limited.append(float(val_clamped))
             else:
                 # 对于旋转部分（rx, ry, rz），不做步进和范围限制
                 tcp_cmd_limited.append(float(v))
-        
+
         # 记录本次的 TCP pose，作为下一次的 prev_tcp
         self._prev_tcp = tcp_cmd_limited.copy()
-        
+
         return tcp_cmd_limited
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
