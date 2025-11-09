@@ -334,10 +334,13 @@ class UR5eRobot(Robot):
         """Reset the environment to its initial state."""
         # 重置机器人到初始位置
         joint_pos = [-2.122, -1.749, -1.78, -2.795, -2.04, -3.126]
-        self.robot1.moveJ(joint_pos, 0.1, 0.5, False)
-
-        self.robot1.moveL(self.init_tcp_pose, 0.1, 0.5, False)
-        time.sleep(2)
+        speed = 0.2
+        acceleration = 0.5
+        time_ur = 4
+        lookahead_time = 0.2
+        gain = 1000
+        self.robot1.servoJ(joint_pos, speed, acceleration, time_ur, lookahead_time, gain)
+        time.sleep(1)
         # 重置手部位置
         hand_targets = [1000, 1000, 1000, 1000, 1000, 1000]
         hand_control(self.ser1, hand_targets)
