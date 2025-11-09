@@ -22,6 +22,9 @@ class UR5eRobot(Robot):
 
     config_class = UR5eConfig
     name = "ur5e"
+    
+    # 全局实例注册：存储当前活动的机器人实例
+    _active_instance: 'UR5eRobot | None' = None
 
     # 6个关节动作
     @cached_property
@@ -82,6 +85,17 @@ class UR5eRobot(Robot):
         
         # 从配置创建相机对象
         self.cameras = make_cameras_from_configs(config.cameras)
+        
+        # 注册为活动实例（单例模式）
+        UR5eRobot._active_instance = self
+
+        self.latest_tcp_pose = None
+        self.latest_joints = None
+    
+    @classmethod
+    def get_active_instance(cls) -> 'UR5eRobot | None':
+        """获取当前活动的机器人实例"""
+        return cls._active_instance
 
     @property
     def is_connected(self) -> bool:
@@ -179,9 +193,11 @@ class UR5eRobot(Robot):
         
         # 获取关节角度
         joints = self.r_inter.getActualQ()
+        self.latest_joints = joints
         print("joints:", [round(x, 3) for x in joints])
         tcp_pose = self.r_inter.getActualTCPPose()
         print("tcp_pose:", [round(x, 3) for x in tcp_pose])
+        self.latest_tcp_pose = tcp_pose
 
         # 读取手部位置
         if self.ser1 is not None:
@@ -308,7 +324,9 @@ class UR5eRobot(Robot):
         """
         joint_pos = self.r_inter.getActualQ()
         tcp_pose = self.r_inter.getActualTCPPose()
-        return joint_pos, tcp_pose
+        self.latest_tcp_pose = tcp_pose
+        self.latest_joints = joint_pos
+        return self.latest_joints, self.latest_tcp_pose
 
     def reset(self) -> None:
         """Reset the environment to its initial state."""
@@ -337,44 +355,31 @@ class UR5eRobot(Robot):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
-        # 获取当前关节位置作为默认值（如果action中缺少某些键）
-        current_joints = self.r_inter.getActualQ() if self.r_inter else [0.0] * 6
-        
-        # 构建完整的 action 字典，确保包含所有必需的键
-        # 如果 action 中缺少某些键，使用当前关节位置
-        complete_action = {}
-        for i in range(6):
-            key = f"joint_{i+1}.pos"
-            complete_action[key] = action.get(key, current_joints[i])
-        
-        # 获取手部位置，如果没有则使用默认值 1.0（张开状态）
-        complete_action["hand_pos"] = action.get("hand_pos", 1.0)
-        
-        # get joint positions from complete_action
-        joint_targets = [complete_action[f"joint_{i+1}.pos"] for i in range(6)]
-        
-        # 使用 servoj 进行平滑运动（推荐）
-        # 参数说明：servoJ(joint_positions, velocity, acceleration, lookahead_time, gain)
-        # lookahead_time 必须在 [0.03, 0.2] 范围内
+        # 控制机械臂
         try:
-            velocity = 0.2
-            acceleration = 0.5
-            lookahead_time = 0.03  # 最小值为 0.03
-            gain = 0.1
-            self.robot1.servoJ(joint_targets, velocity, acceleration, lookahead_time, gain)
+            joint_targets = [action[f"joint_{i+1}.pos"] for i in range(6)]
+            self.robot1.servoJ(joint_targets, 0.2, 0.5, 0.03, 0.1)
         except Exception as e:
             print(f"Warning: Failed to send joint command: {e}")
         
-        # control hand positions
+        # 控制手部
         if self.ser1 is not None:
             try:
-                hand_pos_normalized = complete_action["hand_pos"]
-                hand_value = int(hand_pos_normalized * 1000.0)
-                hand_value = max(0, min(1000, hand_value))
-                hand_targets = [hand_value, hand_value, hand_value, hand_value, hand_value, 0]
+                # 0-4号手指都使用450-1000映射
+                # hand_pos 代表 right_fingers，原始值应在 0~1
+                hand_targets = [1000, 1000, 1000, 1000, 1000, 400]
+
+                pinch = float(action["hand_pos"])  # 期望范围 0~1
+
+                # 0-4指：450-1000
+                action_05 = int(450 + pinch * (1000 - 450))
+                action_05 = min(max(action_05, 450), 1000)
+                for i in range(5):
+                    hand_targets[i] = action_05
+
+                # print(hand_targets)
                 hand_control(self.ser1, hand_targets)
             except Exception as e:
                 print(f"Warning: Failed to control hand: {e}")
         
-        # return actual executed action (包含所有必需的键)
-        return complete_action
+        return action

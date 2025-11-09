@@ -11,8 +11,14 @@ from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from ..teleoperator import Teleoperator
 from .configuration_vision_pro import VisionProTeleopConfig
 from .vp_lib.vr import VRSource
-from .vp_lib.vr2ur import reorder_homogeneous, VRArmMapper
+from .vp_lib.vr2ur import reorder_homogeneous, VRArmMapper, transform_matrix_to_tcp_coords
 from .vp_lib.ur_math import rotation_vector_to_matrix
+
+# 导入 UR5eRobot 以访问活动实例
+try:
+    from lerobot.robots.ur5e.ur5e import UR5eRobot
+except ImportError:
+    UR5eRobot = None
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,10 @@ class VisionProTeleop(Teleoperator):
         self.last_action = None
         self.calibration_data = {}
         self.vr_arm_mapper = VRArmMapper()  # VR 到机械臂的映射器
+        self._robot = config.robot  # 存储配置中的 robot（如果有）
+        # self.robot = None
+        self.robot = UR5eRobot.get_active_instance()
+        self._prev_tcp: list[float] | None = None  # 记录上一次的 TCP pose，用于步进限制
 
     @property
     def action_features(self) -> dict:
@@ -103,28 +113,9 @@ class VisionProTeleop(Teleoperator):
         
         # 获取 TCP pose：优先使用传入的 tcp_pose，否则从 robot 获取，最后使用 config.tcp_pose
         tcp_pose_to_use = None
-        
-        if tcp_pose is not None:
-            tcp_pose_to_use = np.asarray(tcp_pose)
-        elif robot is not None:
-            # 从机器人实例获取 TCP pose
-            if not hasattr(robot, 'is_connected') or not robot.is_connected:
-                raise DeviceNotConnectedError("Robot is not connected. Please connect the robot first.")
-            if not hasattr(robot, 'r_inter') or robot.r_inter is None:
-                raise ValueError("Robot does not have r_inter interface. Please ensure robot is properly connected.")
-            tcp_pose_to_use = np.asarray(robot.r_inter.getActualTCPPose())
-        elif self.config.tcp_pose is not None:
-            tcp_pose_to_use = np.asarray(self.config.tcp_pose)
-        else:
-            raise ValueError(
-                "TCP pose is required for calibration. "
-                "Please provide TCP pose via config.tcp_pose, calibrate(tcp_pose=...), or calibrate(robot=...) parameter."
-            )
-        
-        # 验证 TCP pose 格式
-        if tcp_pose_to_use.shape != (6,):
-            raise ValueError(f"TCP pose must be a 6-element array [x, y, z, rx, ry, rz], got shape {tcp_pose_to_use.shape}")
-        
+
+        tcp_pose_to_use = self.robot.r_inter.getActualTCPPose()
+    
         logger.info("进行标定...")
         
         # 1. 从 VR 获取当前手腕姿态
@@ -168,147 +159,127 @@ class VisionProTeleop(Teleoperator):
         pass
 
     def get_action(self) -> dict[str, Any]:
-       latest = vr_source.latest()
-
-        right_wrist = latest.get('right_wrist')
-        vr_wrist = right_wrist[0]
-        print("vr_wrist_0:\n", vr_wrist)
-        vr_wrist = vr2ur.reorder_homogeneous(vr_wrist)
-        print("vr_wrist_180:\n", vr_wrist)
-        T_arm_ee = vr2arm_mapper.update(vr_wrist)
-        # print("T_arm_ee:\n", T_arm_ee)
-
-        # T_arm_ee to tcp_pose
-        tcp_cmd = vr2ur.transform_matrix_to_tcp_coords(T_arm_ee)
-        print("tcp_pose:\n", tcp_cmd)
-        # tcp_cmd[3] = 0.14331244103918367
-        # tcp_cmd[4] = 2.310831159096738
-        # tcp_cmd[5] = -1.952713280301774
-
-        robot.robot1.servoL(tcp_cmd, speed, acceleration, time_ur, lookahead_time, gain)
-        count += 1
-        if count > 100:
-            print("count:", count)
-        
-        # joints, tcp_pose = robot.read()
-        # tcp2joint = robot.robot1.getInverseKinematics(tcp_cmd, joints)
-        # print("(tcp2joint):", tcp2joint)
-
-        # robot.robot1.servoJ(tcp2joint, speed, acceleration, time_ur, lookahead_time, gain)
-
-        
-
-        right_fingers = latest.get('right_pinch_distance')
-        print(right_fingers)
-
-        # 使用 Fingur 类处理手指数据
-        # hand_targets = finger_processor.calculate_hand_actions(right_fingers,deg=True)
-
-        # 0-4号手指都使用450-1000映射
-        # right_fingers 值在 0~0.1，映射到 450-1000
-        hand_targets = [1000, 1000, 1000, 1000, 1000, 400]
-        pinch = right_fingers  # 0~0.1
-        # 做归一化到 0~1
-        pinch_norm = min(max((pinch - 0.0) / 0.1, 0.0), 1.0)
-
-        # 0-4指：450-1000
-        action_05 = int(450 + pinch_norm * (1000 - 450))
-        action_05 = min(max(action_05, 450), 1000)
-        for i in range(5):
-            hand_targets[i] = action_05
-
-        # print(hand_targets)
-        result = hand_control(robot.ser1, hand_targets)
-
-
-
-
-    def _convert_vision_pro_to_robot_action(self, latest: dict) -> dict[str, float]:
-        if not self.config.use_hand_tracking or 'right_wrist' not in latest:
-            return self._get_zero_action()
-        
-        # 提取右手腕变换矩阵 (1,4,4) -> (4,4)
-        wrist_matrix = latest['right_wrist'][0]
-        
-        # 提取位置（变换矩阵的平移部分）
-        pos = wrist_matrix[:3, 3] * self.config.scale_factor
-        
-        # 应用校准偏移
-        if "initial_wrist" in self.calibration_data:
-            initial_pos = np.array(self.calibration_data["initial_wrist"])
-            pos = pos - initial_pos
-        
-        # 提取旋转（从变换矩阵提取欧拉角或四元数）
-        # 简化：使用变换矩阵的前3列作为方向向量
-        rotation_matrix = wrist_matrix[:3, :3]
-        
-        # 将位置和旋转映射到关节角度（这里需要根据实际机器人调整）
-        # 简化示例：直接映射位置和旋转到关节
-        action = {
-            "joint_1.pos": float(pos[0] * 0.1),  # 需要根据实际调整
-            "joint_2.pos": float(pos[1] * 0.1),
-            "joint_3.pos": float(pos[2] * 0.1),
-            "joint_4.pos": float(rotation_matrix[0, 0] * 0.1),
-            "joint_5.pos": float(rotation_matrix[1, 1] * 0.1),
-            "joint_6.pos": float(rotation_matrix[2, 2] * 0.1),
-        }
-        
-        # 夹爪位置：使用 pinch_distance 或手指数据
-        if 'right_pinch_distance' in latest:
-            # pinch_distance 越大，夹爪越开（归一化到 0-1）
-            pinch = latest['right_pinch_distance']
-            action["hand_pos"] = float(np.clip(pinch / 0.1, 0.0, 1.0))  # 需要根据实际调整
-        else:
-            action["hand_pos"] = 0.5
-        
-        return action
-
-    def _apply_smoothing(self, action: dict) -> dict:
-        """应用动作平滑"""
-        if self.last_action is None:
-            self.last_action = action
-            return action
-        
-        # 指数移动平均平滑
-        smoothed = {}
-        for key in action:
-            smoothed[key] = (
-                self.config.smoothing_factor * self.last_action.get(key, 0.0) +
-                (1 - self.config.smoothing_factor) * action[key]
+        """从 Vision Pro 获取当前动作"""
+        if not self.is_connected:
+            raise DeviceNotConnectedError(
+                f"{self} is not connected. You need to run `connect()` before `get_action()`."
             )
-        
-        self.last_action = smoothed
-        return smoothed
 
-    def _apply_limits(self, action: dict) -> dict:
-        """应用动作限制（确保在安全范围内）"""
-        # TODO: 根据机器人类型设置限制
-        # 示例：限制关节角度范围
-        limited = action.copy()
-        
-        # 限制关节角度在合理范围内（根据你的机器人调整）
-        for i in range(1, 7):
-            key = f"joint_{i}.pos"
-            if key in limited:
-                limited[key] = np.clip(limited[key], -3.14, 3.14)  # ±π 弧度
-        
-        # 限制夹爪位置
-        if "hand_pos" in limited:
-            limited["hand_pos"] = np.clip(limited["hand_pos"], 0.0, 1.0)
-        
-        return limited
+        if not self.is_calibrated:
+            raise RuntimeError(
+                f"{self} is not calibrated. Please call `calibrate()` before `get_action()`."
+            )
 
-    def _get_zero_action(self) -> dict:
-        """返回零动作（所有关节位置为 0）"""
-        return {
-            "joint_1.pos": 0.0,
-            "joint_2.pos": 0.0,
-            "joint_3.pos": 0.0,
-            "joint_4.pos": 0.0,
-            "joint_5.pos": 0.0,
-            "joint_6.pos": 0.0,
-            "hand_pos": 0.5,  # 夹爪半开
-        }
+        try:
+            latest = self.vr_source.latest()
+            if latest is None:
+                if self.last_action is not None:
+                    return self.last_action
+                return self._get_zero_action()
+            
+            # 1. 获取 VR 手腕姿态
+            right_wrist = latest.get('right_wrist')
+            if right_wrist is None:
+                if self.last_action is not None:
+                    return self.last_action
+                return self._get_zero_action()
+            
+            vr_wrist = right_wrist[0].copy()  # shape (4, 4)
+            
+            # 2. 转换坐标系（VR 坐标系 -> 机械臂坐标系）
+            vr_wrist = reorder_homogeneous(vr_wrist)
+            
+            # 3. 使用 VRArmMapper 计算目标机械臂姿态
+            T_arm_ee = self.vr_arm_mapper.update(vr_wrist)
+            
+            # 4. 将齐次变换矩阵转换为 TCP pose [x, y, z, rx, ry, rz]
+            tcp_cmd = transform_matrix_to_tcp_coords(T_arm_ee)
+            
+            # 5. 应用 TCP 步进和范围限制
+            tcp_cmd = self._limit_tcp_pose(tcp_cmd)
+            
+            joints = self.robot.latest_joints
+            tcp2joint = self.robot.robot1.getInverseKinematics(tcp_cmd, joints)
+            print("(tcp2joint):", tcp2joint)
+            
+
+            # hand 
+
+            right_fingers = latest.get('right_pinch_distance')
+            print(right_fingers)
+            # right_fingers 值在 0~0.1
+            # 做归一化到 0~1
+            right_fingers = min(max((right_fingers - 0.0) / 0.1, 0.0), 1.0)
+
+            action = {
+                "joint_1.pos": float(tcp2joint[0]),
+                "joint_2.pos": float(tcp2joint[1]),
+                "joint_3.pos": float(tcp2joint[2]),
+                "joint_4.pos": float(tcp2joint[3]),
+                "joint_5.pos": float(tcp2joint[4]),
+                "joint_6.pos": float(tcp2joint[5]),
+                "hand_pos": float(right_fingers),
+            }
+            return action
+
+        except Exception as e:
+            logger.error(f"Failed to get action from {self}: {e}")
+            return self._get_zero_action()
+    
+    def _limit_tcp_pose(self, tcp_cmd: list[float] | np.ndarray) -> list[float]:
+        """
+        对 TCP pose 进行步进和范围限制
+        
+        Args:
+            tcp_cmd: 目标 TCP pose [x, y, z, rx, ry, rz]
+            
+        Returns:
+            限制后的 TCP pose [x, y, z, rx, ry, rz]
+        """
+        tcp_cmd = np.asarray(tcp_cmd)
+        
+        # 获取上一次的 TCP pose（优先使用类内部记录的，否则从机器人获取）
+        if self._prev_tcp is not None:
+            prev_tcp = np.asarray(self._prev_tcp)
+        elif self.robot is not None and hasattr(self.robot, 'latest_tcp_pose') and self.robot.latest_tcp_pose is not None:
+            prev_tcp = np.asarray(self.robot.latest_tcp_pose)
+        elif self.robot is not None and hasattr(self.robot, 'r_inter') and self.robot.r_inter is not None:
+            prev_tcp = np.asarray(self.robot.r_inter.getActualTCPPose())
+        else:
+            # 如果没有上一帧数据，使用当前值作为初始值（第一次调用时）
+            prev_tcp = tcp_cmd.copy()
+        
+        step = self.config.tcp_step
+        
+        # 对每个维度做步进限制，以及 clamp 到设定范围
+        tcp_cmd_limited = []
+        limits = [
+            self.config.tcp_x_limits,
+            self.config.tcp_y_limits,
+            self.config.tcp_z_limits,
+            (-np.inf, np.inf),  # rx 不限制
+            (-np.inf, np.inf),  # ry 不限制
+            (-np.inf, np.inf),  # rz 不限制
+        ]
+        
+        for i, (v, prev, (low, high)) in enumerate(zip(tcp_cmd, prev_tcp, limits)):
+            # 只对前3维（x, y, z）做步进和范围限制
+            if i < 3:
+                # 步进限制（clip 本帧变化最多 step）
+                delta = v - prev
+                delta = np.clip(delta, -step, step)
+                val = prev + delta
+                # 限定范围
+                val = np.clip(val, low, high)
+                tcp_cmd_limited.append(float(val))
+            else:
+                # 对于旋转部分（rx, ry, rz），不做步进和范围限制
+                tcp_cmd_limited.append(float(v))
+        
+        # 记录本次的 TCP pose，作为下一次的 prev_tcp
+        self._prev_tcp = tcp_cmd_limited.copy()
+        
+        return tcp_cmd_limited
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         """向 Vision Pro 发送反馈（当前不支持）"""

@@ -22,13 +22,29 @@ if [ -d "$DATASET_DIR" ]; then
 fi
 
 # 运行记录脚本
+# python3 -m lerobot.record \
+#     --robot.type=ur5e \
+#     --robot.robot_ip=192.168.31.2 \
+#     --robot.id=my_ur5e \
+#     --teleop.type=vision_pro \
+#     --teleop.mode=visionpro \
+#     --dataset.repo_id=your_username/ur5e_dataset \
+#     --dataset.root="$DATASET_DIR" \
+#     --dataset.num_episodes=100 \
+#     --dataset.single_task="Pick and place the object" \
+#     --dataset.fps=30 \
+#     --dataset.episode_time_s=60 \
+#     --dataset.push_to_hub=false \
+#     --display_data=true \
+#     --resume=false
 python3 -m lerobot.record \
     --robot.type=ur5e \
     --robot.robot_ip=192.168.31.2 \
-    --robot.id=my_ur5e \
-    --teleop.type=keyboard \
+    --teleop.type=vision_pro \
+    --teleop.mode=playback \
+    --teleop.recording_file=pkl/new.pkl \
     --dataset.repo_id=your_username/ur5e_dataset \
-    --dataset.root="$DATASET_DIR" \
+    --dataset.root="$(pwd)/datasets/ur5e_dataset" \
     --dataset.num_episodes=100 \
     --dataset.single_task="Pick and place the object" \
     --dataset.fps=30 \

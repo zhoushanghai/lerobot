@@ -27,9 +27,27 @@ class VisionProStreamer:
     def start_streaming(self): 
 
         stream_thread = Thread(target = self.stream)
+        stream_thread.daemon = True  # 设置为守护线程，主程序退出时自动退出
         stream_thread.start() 
-        while self.latest is None: 
-            pass 
+        
+        # 添加超时机制，避免无限等待
+        timeout = 10  # 10秒超时
+        elapsed = 0
+        while self.latest is None and elapsed < timeout: 
+            time.sleep(0.1)
+            elapsed += 0.1
+        
+        if self.latest is None:
+            raise ConnectionError(
+                f"Failed to connect to Vision Pro at {self.ip}:12345 within {timeout} seconds. "
+                "Please check:\n"
+                "1. Vision Pro device is running and connected to the same network\n"
+                "2. Vision Pro gRPC server is running on port 12345\n"
+                "3. IP address is correct\n"
+                "4. Network connectivity is working\n"
+                "Alternatively, use 'playback' mode with a recording file."
+            )
+        
         print(' == DATA IS FLOWING IN! ==')
         print('Ready to start streaming.') 
 
@@ -59,8 +77,9 @@ class VisionProStreamer:
                     self.latest = transformations 
 
         except Exception as e:
-            print(f"An error occurred: {e}")
-            pass 
+            print(f"An error occurred while connecting to Vision Pro: {e}")
+            # 不设置 self.latest，让超时机制触发
+            # 异常已在超时检查中处理，这里只记录错误 
 
     def get_latest(self): 
         return self.latest

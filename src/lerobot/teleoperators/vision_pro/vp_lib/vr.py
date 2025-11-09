@@ -8,7 +8,7 @@ VR数据源模块：提供统一的数据获取接口
 from typing import Optional, Dict, Any
 import pickle
 
-from avp_stream import VisionProStreamer
+from .VisionProTeleop.avp_stream import VisionProStreamer
 
 
 class VRSource:
@@ -32,7 +32,15 @@ class VRSource:
         self.have_data = True
 
         if self.mode == "visionpro":
-            self._streamer = VisionProStreamer(host, False)
+            try:
+                self._streamer = VisionProStreamer(host, False)
+            except ConnectionError as e:
+                raise ConnectionError(
+                    f"Failed to connect to Vision Pro device at {host}:12345.\n"
+                    f"Error: {e}\n\n"
+                    "To use playback mode instead, set mode='playback' and provide a recording_file.\n"
+                    "Example: --teleop.mode=playback --teleop.recording_file=visionpro_30s_recording.pkl"
+                ) from e
         else:
             if not recording_file:
                 raise ValueError("recording_file is required for playback mode")
