@@ -85,7 +85,14 @@ def hand_start(power):
     ip_address = '192.168.11.210'
     port = 6000
     print('打开Modbus TCP连接！')
-    client = open_modbus(ip_address, port)
+    try:
+        client = open_modbus(ip_address, port)
+    except Exception as e:
+        print('无法连接到灵巧手，请检查网络连接和电源。')
+        raise e
+    if client is None:
+        print('无法连接到灵巧手，请检查网络连接和电源。')
+        return None
     print('设置灵巧手运动速度参数，-1为不设置该运动速度！')
     write_register(client, 1009, 1)
     write6(client,'speedSet', [1000, 1000, 1000, 1000, 1000, 1000]) # ID号改为对应灵巧手的ID，val对应的电缸ID为1,2,3,4,5,6;对应的速度值为0-1000，1000为最大值，0不运动，如果val设置为-1，相应的手指无反应
