@@ -204,13 +204,13 @@ class VisionProTeleop(Teleoperator):
             
             joints = self.robot.latest_joints
             tcp2joint = self.robot.robot1.getInverseKinematics(tcp_cmd, joints)
-            print("(tcp2joint):", tcp2joint)
+            # print("(tcp2joint):", tcp2joint)
             
 
             # hand 
 
             right_fingers = latest.get('right_pinch_distance')
-            print(right_fingers)
+            # print(right_fingers)
             # right_fingers 值在 0~0.1
             # 做归一化到 0~1
             right_fingers = min(max((right_fingers - 0.0) / 0.1, 0.0), 1.0)
@@ -224,7 +224,7 @@ class VisionProTeleop(Teleoperator):
                 "joint_6.pos": float(tcp2joint[5]),
                 "hand_pos": float(right_fingers),
             }
-            print("(action send to robot):", action)
+            # print("(action send to robot):", action)
             self.last_action = action
             return action
 
@@ -237,7 +237,13 @@ class VisionProTeleop(Teleoperator):
     # 不要随意返回0,因为这可能导致机器人失控！！！
     # 不要随意返回0,因为这可能导致机器人失控！！！
     # def _get_zero_action(self) -> dict[str, Any]:
-    #     """返回零动作（所有关节保持当前位置，手部保持张开）"""
+    #     """返回零动作（所有关节保持当前位置，手部保            # "wrist_camera": OpenCVCameraConfig(
+            #     index_or_path=10,  # 更新为实际可用的相机索引
+            #     fps=30,
+            #     width=640,
+            #     height=480,
+            #     rotation=Cv2Rotation.ROTATE_180,  # 旋转180度（倒置）
+            # ),持张开）"""
     #     if self.last_action is not None:
     #         return self.last_action
         

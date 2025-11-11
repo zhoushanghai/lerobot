@@ -366,7 +366,7 @@ class VRArmMapper:
 
         # 当前 VR 相对于初始标定时的变化量
         delta_T_vr = self.T_vr_hand_init_invert @ T_vr_hand_current
-        print("手在vr视图下的变化量：:\n", delta_T_vr)
+        # print("手在vr视图下的变化量：:\n", delta_T_vr)
 
         # 先计算转换
         T_arm = self.T_arm_ee_init @ delta_T_vr
@@ -376,7 +376,7 @@ class VRArmMapper:
         # T_translate_z[2, 3] = -0.1
         # T_arm = T_arm @ T_translate_z
 
-        print("机械臂在机械臂基底坐标系下的值:\n", T_arm)
+        # print("机械臂在机械臂基底坐标系下的值:\n", T_arm)
         return T_arm
 
     def reset(self):

@@ -198,9 +198,9 @@ class UR5eRobot(Robot):
         # 获取关节角度
         joints = self.r_inter.getActualQ()
         self.latest_joints = joints
-        print("joints:", [round(x, 3) for x in joints])
+        # print("joints:", [round(x, 3) for x in joints])
         tcp_pose = self.r_inter.getActualTCPPose()
-        print("tcp_pose:", [round(x, 3) for x in tcp_pose])
+        # print("tcp_pose:", [round(x, 3) for x in tcp_pose])
         self.latest_tcp_pose = tcp_pose
 
         # 读取手部位置
@@ -343,7 +343,7 @@ class UR5eRobot(Robot):
         gain = 1000
         self.robot1.servoJ(joint_pos, speed, acceleration, time_ur, lookahead_time, gain)
         time.sleep(3.5)
-        
+
         self.need_calibration = True
         
         # 重置手部位置
@@ -365,7 +365,7 @@ class UR5eRobot(Robot):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
         
-        print("ur5e send_action:", action)
+        # print("ur5e send_action:", action)
 
         # 控制机械臂
         try:

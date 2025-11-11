@@ -39,13 +39,13 @@ class UR5eConfig(RobotConfig):
                 width=640,   # 相机实际支持的分辨率宽度
                 height=480,  # 相机实际支持的分辨率高度
             ),
-            "wrist_camera": OpenCVCameraConfig(
-                index_or_path=8,  # 更新为实际可用的相机索引
-                fps=30,
-                width=640,
-                height=480,
-                rotation=Cv2Rotation.ROTATE_180,  # 旋转180度（倒置）
-            ),
+            # "wrist_camera": OpenCVCameraConfig(
+            #     index_or_path=10,  # 更新为实际可用的相机索引
+            #     fps=30,
+            #     width=640,
+            #     height=480,
+            #     rotation=Cv2Rotation.ROTATE_180,  # 旋转180度（倒置）
+            # ),
         }
     )
 

@@ -49,9 +49,13 @@ python3 -m lerobot.record \
     --dataset.single_task="Pick and place the object" \
     --dataset.fps=30 \
     --dataset.episode_time_s=60 \
+    --dataset.reset_time_s=30 \
     --dataset.push_to_hub=false \
     --display_data=true \
     --resume=false
 
 
     # playback visionpro
+
+    # 列出所有视频设备
+    # v4l2-ctl --list-devices
