@@ -12,8 +12,10 @@ from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from ..teleoperator import Teleoperator
 from .configuration_vision_pro import VisionProTeleopConfig
 from .vp_lib.vr import VRSource
-from .vp_lib.vr2ur import reorder_homogeneous, VRArmMapper, transform_matrix_to_tcp_coords
+from .vp_lib.vr2ur import reorder_homogeneous, VRArmMapper, transform_matrix_to_tcp_coords, tcp_coords_to_transform_matrix
 from .vp_lib.ur_math import rotation_vector_to_matrix
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 # 导入 UR5eRobot 以访问活动实例
 try:
@@ -39,6 +41,7 @@ class VisionProTeleop(Teleoperator):
         # self.robot = None
         self.robot = UR5eRobot.get_active_instance()
         self._prev_tcp: list[float] | None = None  # 记录上一次的 TCP pose，用于步进限制
+        self._prev_transform_matrix: np.ndarray | None = None  # 记录上一次的齐次变换矩阵，用于步进限制
 
     @property
     def action_features(self) -> dict:
@@ -116,7 +119,7 @@ class VisionProTeleop(Teleoperator):
         joint,tcp = self.robot.read()
         tcp_pose_to_use = tcp 
 
-        logger.info("进行标定...")
+        logger.info("======================进行标定=======================")
         
         # 1. 从 VR 获取当前手腕姿态
         latest = self.vr_source.latest()
@@ -133,26 +136,29 @@ class VisionProTeleop(Teleoperator):
         
         # 3. 转换坐标系（VR 坐标系 -> 机械臂坐标系）
         T_vr = reorder_homogeneous(T_vr)
-        logger.info(f"由 right_wrist 计算得到的齐次变换矩阵 T_vr:\n{T_vr}")
+        # logger.info(f"由 right_wrist 计算得到的齐次变换矩阵 T_vr:\n{T_vr}")
         
         # 4. 使用提供的 TCP pose
-        logger.info(f"当前 TCP pose (旋转矢量): {[round(x, 3) for x in tcp_pose_to_use]}")
+        # logger.info(f"当前 TCP pose (旋转矢量): {[round(x, 3) for x in tcp_pose_to_use]}")
         
         # 5. 将 TCP pose（旋转矢量）转换为齐次变换矩阵
         T_tcp = rotation_vector_to_matrix(tcp_pose_to_use)
-        logger.info(f"由 tcp_pose 计算得到的齐次变换矩阵 T_tcp:\n{T_tcp}")
+        # logger.info(f"由 tcp_pose 计算得到的齐次变换矩阵 T_tcp:\n{T_tcp}")
         
         # 6. 执行标定
         T_vr_hand_init = self.vr_arm_mapper.calibrate(T_vr, T_tcp)
-        logger.info(f"标定完成！T_vr_hand_init:\n{T_vr_hand_init}")
+        
+        logger.info(f"标定完成！ VR ：\n{T_vr}\n机械臂TCP：\n{tcp_pose_to_use}")
+        logger.info("======================标定完成！=======================")
         
         # 保存校准数据到 calibration_data（用于兼容性）
         self.calibration_data = {
             "T_vr_hand_init": T_vr_hand_init.tolist(),
             "T_tcp_init": T_tcp.tolist(),
         }
+
         
-        logger.info(f"{self} calibration completed.")
+        # logger.info(f"{self} calibration completed.")
 
     def configure(self) -> None:
         """配置 Vision Pro 设备（当前无需额外配置）"""
@@ -162,12 +168,14 @@ class VisionProTeleop(Teleoperator):
         """从 Vision Pro 获取当前动作"""
         if not self.is_connected:
             raise DeviceNotConnectedError(
-                f"{self} is not connected. You need to run `connect()` before `get_action()`."
+                f"{self} is not connected. You need to run `connect()` before `get_action()."
             )
 
         if self.robot.need_calibration:
+            print("!!!!!!!!!!Robot needs calibration, calibrating now...")
             self.calibrate()
             self.robot.need_calibration = False
+            self.reset_all_values()
 
         if not self.is_calibrated:
             raise RuntimeError(
@@ -176,6 +184,7 @@ class VisionProTeleop(Teleoperator):
 
         try:
             latest = self.vr_source.latest()
+            
             if latest is None:
                 if self.last_action is not None:
                     return self.last_action
@@ -189,18 +198,22 @@ class VisionProTeleop(Teleoperator):
                 # return self._get_zero_action()
             
             vr_wrist = right_wrist[0].copy()  # shape (4, 4)
+            print("get_action_latest:", vr_wrist)
             
             # 2. 转换坐标系（VR 坐标系 -> 机械臂坐标系）
             vr_wrist = reorder_homogeneous(vr_wrist)
             
             # 3. 使用 VRArmMapper 计算目标机械臂姿态
             T_arm_ee = self.vr_arm_mapper.update(vr_wrist)
-            
+
+            # 使用实例方法进行步进限制
+            T_arm_ee = self.step_limit_transform_xyz_fixed(T_arm_ee, self.config.tcp_step, self.config.rot_step)
+
             # 4. 将齐次变换矩阵转换为 TCP pose [x, y, z, rx, ry, rz]
             tcp_cmd = transform_matrix_to_tcp_coords(T_arm_ee)
             
             # 5. 应用 TCP 步进和范围限制
-            tcp_cmd = self._limit_tcp_pose(tcp_cmd)
+            # tcp_cmd = self._limit_tcp_pose(tcp_cmd)
             
             joints = self.robot.latest_joints
             tcp2joint = self.robot.robot1.getInverseKinematics(tcp_cmd, joints)
@@ -229,34 +242,12 @@ class VisionProTeleop(Teleoperator):
             return action
 
         except Exception as e:
-            import sys
-            print(f"Fatal error: {e}", file=sys.stderr)
-            sys.exit(1)
-    
-    # 不要随意返回0,因为这可能导致机器人失控！！！
-    # 不要随意返回0,因为这可能导致机器人失控！！！
-    # 不要随意返回0,因为这可能导致机器人失控！！！
-    # def _get_zero_action(self) -> dict[str, Any]:
-    #     """返回零动作（所有关节保持当前位置，手部保            # "wrist_camera": OpenCVCameraConfig(
-            #     index_or_path=10,  # 更新为实际可用的相机索引
-            #     fps=30,
-            #     width=640,
-            #     height=480,
-            #     rotation=Cv2Rotation.ROTATE_180,  # 旋转180度（倒置）
-            # ),持张开）"""
-    #     if self.last_action is not None:
-    #         return self.last_action
-        
-    #     # 返回零动作：所有关节为0，手部完全张开
-    #     return {
-    #         "joint_1.pos": 0.0,
-    #         "joint_2.pos": 0.0,
-    #         "joint_3.pos": 0.0,
-    #         "joint_4.pos": 0.0,
-    #         "joint_5.pos": 0.0,
-    #         "joint_6.pos": 0.0,
-    #         "hand_pos": 1.0,  # 完全张开
-    #     }
+            # 避免直接退出整个进程。记录异常，若有上一个有效动作则返回上一次动作，否则重新抛出异常。
+            logger.exception("Error in VisionProTeleop.get_action: %s", e)
+            if self.last_action is not None:
+                return self.last_action
+            raise
+
     
     def _limit_tcp_pose(self, tcp_cmd: list[float] | np.ndarray) -> list[float]:
         """
@@ -276,13 +267,14 @@ class VisionProTeleop(Teleoperator):
         # 获取上一次的 TCP pose（优先使用类内部记录的，否则从机器人获取）
         if self._prev_tcp is not None:
             prev_tcp = np.asarray(self._prev_tcp)
-        elif self.robot is not None and hasattr(self.robot, 'latest_tcp_pose') and self.robot.latest_tcp_pose is not None:
-            prev_tcp = np.asarray(self.robot.latest_tcp_pose)
+            print("Using internally stored previous TCP pose.")
         elif self.robot is not None and hasattr(self.robot, 'r_inter') and self.robot.r_inter is not None:
             prev_tcp = np.asarray(self.robot.r_inter.getActualTCPPose())
+            print("Using robot's actual TCP pose as previous TCP.")
         else:
             # 如果没有上一帧数据，使用当前值作为初始值（第一次调用时）
             prev_tcp = tcp_cmd.copy()
+            print("No previous TCP pose available, initializing with current command.")
 
         step = self.config.tcp_step
 
@@ -323,8 +315,84 @@ class VisionProTeleop(Teleoperator):
 
         return tcp_cmd_limited
 
+
+    def step_limit_transform_xyz_fixed(self, transform_matrix, move_step_xyz, rot_step_xyz):
+        # 兼容配置中传入标量或长度为3的序列：将步进限制归一化为长度为3的 numpy 数组
+        move_step_xyz = np.asarray(move_step_xyz)
+        if move_step_xyz.ndim == 0 or move_step_xyz.size == 1:
+            move_step_xyz = np.full(3, float(move_step_xyz))
+        elif move_step_xyz.size != 3:
+            raise ValueError("move_step_xyz must be a scalar or sequence of length 3")
+
+        rot_step_xyz = np.asarray(rot_step_xyz)
+        if rot_step_xyz.ndim == 0 or rot_step_xyz.size == 1:
+            rot_step_xyz = np.full(3, float(rot_step_xyz))
+        elif rot_step_xyz.size != 3:
+            raise ValueError("rot_step_xyz must be a scalar or sequence of length 3")
+
+        # 获取上一次的 TCP pose（优先使用类内部记录的，否则从机器人获取）
+        if self._prev_transform_matrix is not None:
+            prev_transform_matrix = np.asarray(self._prev_transform_matrix)
+            print("Using internally stored previous transform matrix.")
+        elif self.robot is not None and hasattr(self.robot, 'r_inter') and self.robot.r_inter is not None:
+            tcp = np.asarray(self.robot.r_inter.getActualTCPPose())
+            prev_transform_matrix = tcp_coords_to_transform_matrix(tcp)
+            print("Using robot's actual transform matrix as previous transform matrix.")
+        else:
+            # 如果没有上一帧数据，使用当前值作为初始值（第一次调用时）
+            prev_transform_matrix = transform_matrix.copy()
+            print("No previous transform matrix available, initializing with current command.")
+
+        # 确保输入是numpy数组
+        T_current = np.array(transform_matrix)
+        T_prev = np.array(prev_transform_matrix)
+        
+        # 计算相对变换矩阵
+        T_relative = np.linalg.inv(T_prev) @ T_current
+        
+        # 提取平移部分
+        translation = T_relative[:3, 3]
+        
+        # 按XYZ方向分别限制平移
+        for i in range(3):
+            if abs(translation[i]) > float(move_step_xyz[i]):
+                translation[i] = np.sign(translation[i]) * float(move_step_xyz[i])
+                print(f"Translation limit exceeded on axis {i}: {translation[i]}, limiting to {move_step_xyz[i]}")
+        
+        # 提取旋转部分并转换为XYZ固定角欧拉角
+        rotation_matrix = T_relative[:3, :3]
+        rotation = R.from_matrix(rotation_matrix)
+        
+        # 使用XYZ固定角顺序（先绕X轴，再绕Y轴，最后绕Z轴）
+        euler_angles = rotation.as_euler('xyz')
+        
+        # 按各轴分别限制旋转角度
+        for i in range(3):
+            if abs(euler_angles[i]) > float(rot_step_xyz[i]):
+                euler_angles[i] = np.sign(euler_angles[i]) * float(rot_step_xyz[i])
+                print(f"Rotation limit exceeded on axis {i}: {euler_angles[i]}, limiting to {rot_step_xyz[i]}")
+                
+        
+        # 将限制后的欧拉角转换回旋转矩阵
+        rotation_limited = R.from_euler('xyz', euler_angles)
+        rotation_matrix_limited = rotation_limited.as_matrix()
+        
+        # 构建限制后的相对变换矩阵
+        T_relative_limited = np.eye(4)
+        T_relative_limited[:3, :3] = rotation_matrix_limited
+        T_relative_limited[:3, 3] = translation
+        
+        # 计算限制后的绝对变换矩阵
+        limited_transform = T_prev @ T_relative_limited
+
+        # 保存为上一次的变换矩阵
+        self._prev_transform_matrix = limited_transform.copy()
+        
+        return limited_transform
+
+
     def send_feedback(self, feedback: dict[str, Any]) -> None:
-        """向 Vision Pro 发送反馈（当前不支持）"""
+        # """向 Vision Pro 发送反馈（当前不支持）"""tcp_coords_to_transform_matrix
         pass
 
     def disconnect(self) -> None:
@@ -337,3 +405,8 @@ class VisionProTeleop(Teleoperator):
         self.vr_source = None
         logger.info(f"{self} disconnected.")
 
+    def reset_all_values(self) -> None:
+        self._prev_tcp = None
+        self.last_action = None
+        self._prev_transform_matrix = None
+        logger.info(f"{self} internal values reset.")

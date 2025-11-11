@@ -345,6 +345,7 @@ class UR5eRobot(Robot):
         time.sleep(3.5)
 
         self.need_calibration = True
+        print("UR5e reset completed, need_calibration = True")
         
         # 重置手部位置
         hand_targets = [1000, 1000, 1000, 1000, 1000, 1000]

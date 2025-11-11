@@ -101,6 +101,39 @@ def transform_matrix_to_tcp_coords(transform_matrix):
     
     return xyz + rotvec.tolist()
 
+def tcp_coords_to_transform_matrix(tcp_coords):
+    """
+    将TCP坐标 [xyz, rotation_vector] 转换为4x4齐次变换矩阵
+    
+    Args:
+        tcp_coords: list or np.ndarray, [x, y, z, rx, ry, rz]
+            x, y, z: 位置坐标
+            rx, ry, rz: 旋转矢量分量（弧度）
+    
+    Returns:
+        np.ndarray: 4x4齐次变换矩阵
+    """
+    # 确保输入是numpy数组
+    coords = np.array(tcp_coords)
+    
+    if coords.shape != (6,):
+        raise ValueError(f"Expected 6 elements [x,y,z,rx,ry,rz], got {coords.shape}")
+    
+    # 提取位置和旋转矢量
+    xyz = coords[:3]  # 位置向量
+    rotvec = coords[3:]  # 旋转向量
+    
+    # 创建旋转矩阵
+    rotation = R.from_rotvec(rotvec)
+    rotation_matrix = rotation.as_matrix()
+    
+    # 构建齐次变换矩阵
+    transform_matrix = np.eye(4)
+    transform_matrix[:3, :3] = rotation_matrix  # 设置旋转部分
+    transform_matrix[:3, 3] = xyz  # 设置平移部分
+    
+    return transform_matrix
+
 
 def limit_tcp_pose(tcp_pose_target, tcp_pose_current, max_step, rotation_step=0.1):
     """
@@ -366,7 +399,7 @@ class VRArmMapper:
 
         # 当前 VR 相对于初始标定时的变化量
         delta_T_vr = self.T_vr_hand_init_invert @ T_vr_hand_current
-        # print("手在vr视图下的变化量：:\n", delta_T_vr)
+        print("手在vr视图下的变化量：:\n", delta_T_vr)
 
         # 先计算转换
         T_arm = self.T_arm_ee_init @ delta_T_vr

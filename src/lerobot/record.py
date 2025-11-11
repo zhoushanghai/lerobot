@@ -356,7 +356,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
         recorded_episodes = 0
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
-            log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
+            log_say(f"！！！！！Recording episode {dataset.num_episodes}", cfg.play_sounds)
             record_loop(
                 robot=robot,
                 events=events,
@@ -383,15 +383,15 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     except Exception as e:
                         logging.warning(f"Robot reset failed: {e}. Continuing with manual reset phase.")
                 # Run reset loop to allow manual teleoperation if needed
-                record_loop(
-                    robot=robot,
-                    events=events,
-                    fps=cfg.dataset.fps,
-                    teleop=teleop,
-                    control_time_s=cfg.dataset.reset_time_s,
-                    single_task=cfg.dataset.single_task,
-                    display_data=cfg.display_data,
-                )
+                # record_loop(
+                #     robot=robot,
+                #     events=events,
+                #     fps=cfg.dataset.fps,
+                #     teleop=teleop,
+                #     control_time_s=cfg.dataset.reset_time_s,
+                #     single_task=cfg.dataset.single_task,
+                #     display_data=cfg.display_data,
+                # )
 
             if events["rerecord_episode"]:
                 log_say("Re-record episode", cfg.play_sounds)
