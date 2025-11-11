@@ -5,6 +5,8 @@ from typing import *
 import time
 from .ur_math import *
 
+from .smooth import se3_smooth_filter
+
 T_vr_to_world_initial = None
 T_robot_to_world_initial = None
 
@@ -354,6 +356,8 @@ class VRArmMapper:
         self.T_vr_hand_init_invert = None    # 标定时 VR 手腕姿态
         self.T_arm_ee_init = None     # 标定时 机械臂末端姿态
         self.is_calibrated = False
+        self._last_delta_T_vr = np.eye(4)
+
 
 
     @staticmethod
@@ -383,7 +387,11 @@ class VRArmMapper:
         self.T_arm_ee_init = T_arm_ee.copy()
         self.T_arm_ee_init_invert = self.invert_transform(self.T_arm_ee_init)
         self.is_calibrated = True
-        # return self.T_vr_hand_init_invert
+        # return self.
+
+        # no change
+        self._last_delta_T_vr = np.eye(4)
+
         return self.T_vr_hand_init
 
     def update(self, T_vr_hand_current):
@@ -399,17 +407,17 @@ class VRArmMapper:
 
         # 当前 VR 相对于初始标定时的变化量
         delta_T_vr = self.T_vr_hand_init_invert @ T_vr_hand_current
+
+        # 平滑处理 delta_T_vr
+        delta_T_vr = se3_smooth_filter(delta_T_vr, self._last_delta_T_vr, alpha=0.1)
+
+
         print("手在vr视图下的变化量：:\n", delta_T_vr)
 
         # 先计算转换
         T_arm = self.T_arm_ee_init @ delta_T_vr
 
-        # # 再在z轴方向平移-0.1
-        # T_translate_z = np.eye(4)
-        # T_translate_z[2, 3] = -0.1
-        # T_arm = T_arm @ T_translate_z
-
-        # print("机械臂在机械臂基底坐标系下的值:\n", T_arm)
+        self._last_delta_T_vr = delta_T_vr.copy()
         return T_arm
 
     def reset(self):
